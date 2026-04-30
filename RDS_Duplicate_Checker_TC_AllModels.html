@@ -2,7 +2,7 @@
 <html lang="nb">
 <head>
   <meta charset="UTF-8" />
-  <title>RDS Duplicate Checker - Alle 3D-modeller V.3</title>
+  <title>RDS Duplicate Checker - Alle 3D-modeller V.4</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
   <style>
@@ -31,7 +31,7 @@
 <body>
 <header>
   <div class="title">
-    <h1>RDS Duplicate Checker V.3</h1>
+    <h1>RDS Duplicate Checker V.4</h1>
     <p>Validerer duplikate koder i <strong>2_RDS</strong> → <strong>01. RDS-tag</strong> på alle modeller som er lastet/synlige i 3D-visningen · VA-kumdeler og armeringsjern med samme RDS-tag grupperes</p>
   </div>
   <span class="badge" id="modelBadge">Ikke tilkoblet</span>
@@ -143,7 +143,11 @@ function isRebarCompositePart(row){
 }
 
 function duplicateUnitKey(row){
-  if (isVaKumCompositePart(row)) return `VA_KUM:${extractVaKumId(row)}`;
+  // VA-kummer består ofte av flere IFC-objekter/deler med samme 01. RDS-tag
+  // (lokk, kjegle, bunnring, bunnplate osv.). I praksis kan delene ha ulik
+  // eller manglende ID.nr i IFC-en, derfor grupperes VA-kumdeler på selve
+  // RDS-taggen, ikke på ID.nr. Da blir alle deler av samme kum én logisk enhet.
+  if (isVaKumCompositePart(row)) return `VA_KUM_RDS:${row.rdsTag}`;
   if (isRebarCompositePart(row)) return `ARMERING:${row.rdsTag}`;
   return `OBJ:${row.modelId}:${row.runtimeId}`;
 }
@@ -216,7 +220,7 @@ function buildDuplicateStats(){
     if (!tag) continue;
 
     const unitKey = duplicateUnitKey(r);
-    const compositeId = unitKey.startsWith('VA_KUM:') ? unitKey.replace('VA_KUM:', '') : '';
+    const compositeId = unitKey.startsWith('VA_KUM_RDS:') ? (extractVaKumId(r) || 'VA-kum') : '';
     const rebarGroup = unitKey.startsWith('ARMERING:') ? 'Armering' : '';
     r.duplicateUnitKey = unitKey;
     r.compositeId = compositeId || rebarGroup;
@@ -305,7 +309,7 @@ async function validate(){
     btnValidate.disabled = false; btnReset.disabled = false; searchInput.disabled = false;
     btnColorize.disabled = duplicateRows.length === 0;
     btnExport.disabled = rows.length === 0;
-    setStatus(`✅ Ferdig. ${rows.length} objekter med 2_RDS kontrollert fra ${models.length} modell(er). ${duplicateRows.length} objekter har duplikat RDS-tag fordelt på ${duplicateGroups.length} koder. VA-kumdeler med samme ID.nr og armeringsjern med samme RDS-tag telles som én enhet.`, duplicateRows.length ? '' : 'ok');
+    setStatus(`✅ Ferdig. ${rows.length} objekter med 2_RDS kontrollert fra ${models.length} modell(er). ${duplicateRows.length} objekter har duplikat RDS-tag fordelt på ${duplicateGroups.length} koder. VA-kumdeler og armeringsjern med samme RDS-tag telles som én enhet.`, duplicateRows.length ? '' : 'ok');
   }catch(e){
     btnValidate.disabled = false;
     setStatus('❌ Feil ved validering: ' + (e.message || e), 'error');
@@ -330,7 +334,7 @@ function renderResults(extra){
   const duplicateCodes = duplicateGroups.length;
   const duplicateObjects = duplicateRows.length;
   const compositeVaKumParts = rows.filter(r => r.isCompositeVaKumPart).length;
-  const compositeVaKumUnits = new Set(rows.filter(r => r.isCompositeVaKumPart).map(r => `${r.rdsTag}|${r.compositeId}`)).size;
+  const compositeVaKumUnits = new Set(rows.filter(r => r.isCompositeVaKumPart).map(r => r.rdsTag)).size;
   const okObjects = rows.filter(r => r.rdsTag && !r.isDuplicate).length;
   const missingTag = rows.filter(r => !r.rdsTag).length;
   const maxBar = Math.max(rows.length, duplicateObjects, missingTag, 1);
@@ -355,7 +359,7 @@ function renderResults(extra){
         ${bar('Objekter med tag', totalWithTag, maxBar, '#3fb950')}
         ${bar('Duplikatobjekter', duplicateObjects, maxBar, '#f85149')}
         ${bar('Mangler tag', missingTag, maxBar, '#d29922')}
-        <div class="hint" style="margin-top:5px">Hoppet over: ${extra.skippedIfc} IFC container/type-objekter · ${extra.missingRds} uten 2_RDS. VA-kumdeler gruppert: ${compositeVaKumParts} objekter / ${compositeVaKumUnits} kum-enheter. Armeringsjern med samme RDS-tag grupperes som én enhet.</div>
+        <div class="hint" style="margin-top:5px">Hoppet over: ${extra.skippedIfc} IFC container/type-objekter · ${extra.missingRds} uten 2_RDS. VA-kumdeler gruppert: ${compositeVaKumParts} objekter / ${compositeVaKumUnits} RDS-kumgrupper. Armeringsjern med samme RDS-tag grupperes som én enhet.</div>
       </div></div>
     </section>
     <section class="panel"><div class="panel-h"><h3>Duplikate RDS-tagger</h3><span class="hint">Klikk på rad for å velge objekt i modellen</span></div><div class="table-wrap"><table><thead><tr><th>Status</th><th>Antall</th><th>Modell</th><th>01. RDS-tag</th><th>Objektnavn</th><th>GUID</th><th>Objektklasse</th><th>Objekttype</th><th>ID.nr / gruppe</th></tr></thead><tbody id="resultBody"></tbody></table></div></section>
