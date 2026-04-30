@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+  <meta charset="UTF-8" />
+  <title>RDS Duplicate Checker - Alle 3D-modeller</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;700;800&display=swap');
+    :root{
+      --bg:#0d1117;--surface:#161b22;--surface2:#1f2937;--border:#30363d;--ink:#e6edf3;--muted:#7d8590;
+      --red:#f85149;--red-dim:#3a1212;--green:#3fb950;--green-dim:#1a3a22;--blue:#58a6ff;--blue-dim:#0d2044;--yellow:#d29922;--yellow-dim:#2d2205;
+      --mono:'JetBrains Mono',monospace;--sans:'Syne',sans-serif;
+    }
+    *{box-sizing:border-box;margin:0;padding:0} body{background:var(--bg);color:var(--ink);font-family:var(--sans);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+    header{background:var(--surface);border-bottom:1px solid var(--border);padding:11px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+    .title{flex:1}.title h1{font-size:17px;font-weight:800;letter-spacing:-.3px}.title p{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px}
+    .badge{font-family:var(--mono);font-size:10px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;color:var(--muted);white-space:nowrap}
+    .btn{font-family:var(--sans);font-size:12px;font-weight:700;padding:8px 13px;border-radius:7px;border:1px solid var(--border);cursor:pointer;white-space:nowrap;background:var(--surface2);color:var(--ink)}
+    .btn:disabled{opacity:.42;cursor:not-allowed}.btn:not(:disabled):hover{opacity:.86}.btn-primary{background:var(--blue);color:#000;border-color:var(--blue)}.btn-red{background:var(--red-dim);color:var(--red);border-color:#5a1b1b}.btn-green{background:var(--green-dim);color:var(--green);border-color:#24512d}.btn-export{background:var(--blue-dim);color:var(--blue);border-color:#1a3a6c}
+    #statusBar{font-family:var(--mono);font-size:11px;padding:7px 16px;background:var(--blue-dim);color:var(--blue);border-bottom:1px solid #1a3a5c;flex-shrink:0}#statusBar.ok{background:var(--green-dim);color:var(--green);border-color:#1a3a22}#statusBar.error{background:var(--red-dim);color:var(--red);border-color:#3a1212}
+    #modelBar{background:var(--surface);border-bottom:1px solid var(--border);padding:9px 16px;display:flex;gap:10px;align-items:center;flex-shrink:0}#modelBar label{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}select,input{font-family:var(--mono);font-size:12px;background:var(--surface2);color:var(--ink);border:1px solid var(--border);border-radius:7px;padding:7px 10px}select{flex:1;min-width:0}input{width:260px}select:disabled{opacity:.45}
+    main{flex:1;overflow:auto;padding:15px 16px;display:flex;flex-direction:column;gap:14px}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 14px}.card .label{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}.card .value{font-size:30px;font-weight:800;line-height:1.05;margin-top:5px}.card .sub{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px}.card.blue{border-color:#0d2044}.card.blue .value{color:var(--blue)}.card.green{border-color:#1e4028}.card.green .value{color:var(--green)}.card.red{border-color:#3a1212}.card.red .value{color:var(--red)}.card.yellow{border-color:#3a2d05}.card.yellow .value{color:var(--yellow)}
+    .grid{display:grid;grid-template-columns:420px 1fr;gap:14px}.panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}.panel-h{padding:11px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}.panel-h h3{font-size:13px;flex:1}.hint{font-family:var(--mono);font-size:10px;color:var(--muted)}.panel-body{padding:14px}
+    .chart{display:flex;align-items:center;gap:20px}.donut{width:150px;height:150px;flex-shrink:0}.legend{display:flex;flex-direction:column;gap:8px;min-width:160px}.legend-row{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px}.dot{width:11px;height:11px;border-radius:50%;flex-shrink:0}.legend-row b{margin-left:auto;color:var(--ink)}
+    .bars{display:flex;flex-direction:column;gap:9px}.bar-row{display:grid;grid-template-columns:130px 1fr 56px;align-items:center;gap:10px}.bar-label{font-family:var(--mono);font-size:11px;color:var(--muted)}.bar-track{height:18px;background:var(--surface2);border-radius:5px;overflow:hidden}.bar-fill{height:100%;transition:width .4s ease}.bar-val{font-family:var(--mono);font-size:11px;text-align:right;color:var(--ink)}
+    .table-wrap{max-height:430px;overflow:auto}table{width:100%;border-collapse:collapse;font-size:11px}thead th{position:sticky;top:0;background:var(--surface2);color:var(--muted);font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.35px;padding:9px 10px;text-align:left;z-index:1;white-space:nowrap}tbody tr{border-bottom:1px solid #1c2128}tbody tr:hover td{background:#1c2128}td{font-family:var(--mono);font-size:10px;padding:7px 10px;vertical-align:middle}.rds{max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--blue)}.muted{color:var(--muted)}.pill{display:inline-block;padding:3px 8px;border-radius:999px;font-family:var(--mono);font-size:10px;border:1px solid var(--border);background:var(--surface2);color:var(--muted)}.pill.red{background:var(--red-dim);color:var(--red);border-color:#3a1212}.pill.green{background:var(--green-dim);color:var(--green);border-color:#1e4028}.empty{text-align:center;padding:42px 20px;color:var(--muted);font-size:13px}.empty .icon{font-size:34px;margin-bottom:8px}.clickable{cursor:pointer}.clickable:hover{color:var(--blue)}
+    ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px} @media(max-width:920px){.cards{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}header{flex-wrap:wrap}input{width:180px}}
+  </style>
+</head>
+<body>
+<header>
+  <div class="title">
+    <h1>RDS Duplicate Checker</h1>
+    <p>Validerer duplikate koder i <strong>2_RDS</strong> → <strong>01. RDS-tag</strong> på alle modeller som er lastet/synlige i 3D-visningen</p>
+  </div>
+  <span class="badge" id="modelBadge">Ikke tilkoblet</span>
+  <button class="btn" id="btnLoad" disabled>Oppdater 3D-modeller</button>
+  <button class="btn btn-primary" id="btnValidate" disabled>▶ Valider alle modeller</button>
+  <button class="btn btn-red" id="btnColorize" disabled>🎨 Fargelegg duplikater</button>
+  <button class="btn btn-green" id="btnUncolor" disabled>⬜ Fjern farger</button>
+  <button class="btn btn-export" id="btnExport" disabled>⬇ CSV</button>
+  <button class="btn" id="btnReset" disabled>↺ Nullstill</button>
+</header>
+<div id="statusBar">Kobler til Trimble Connect…</div>
+<div id="modelBar">
+  <label>3D-visning:</label>
+  <span class="badge" id="visibleModelsInfo">Ingen modeller hentet</span>
+  <label>Søk:</label>
+  <input id="searchInput" placeholder="RDS-tag, GUID, modell eller navn" disabled />
+</div>
+<main id="mainContent">
+  <div class="empty"><div class="icon">🔎</div>Trykk <strong>Valider alle modeller</strong> for å kontrollere duplikate RDS-tagger i alle modeller i 3D-visningen.</div>
+</main>
+<script>
+const PSET = '2_RDS';
+const RDS_PROP = '01. RDS-tag';
+const IGNORE_IFC_TYPES = new Set(['IFCPROJECT','IFCSITE','IFCBUILDING','IFCBUILDINGSTOREY','IFCSPACE','IFCZONE','IFCBUILDINGUNIT','IFCSPATIALZONE','IFCGROUP','IFCSYSTEM','IFCBUILDINGELEMENTPROXYTYPE','IFCFLOWTERMINALTYPE','IFCFLOWSEGMENTTYPE','IFCDISTRIBUTIONELEMENTTYPE']);
+let API = null;
+let allModels = [];
+let rows = [];
+let duplicateRows = [];
+let duplicateGroups = [];
+let currentModelName = '';
+let searchTerm = '';
+const $ = id => document.getElementById(id);
+const btnLoad = $('btnLoad'), btnValidate = $('btnValidate'), btnColorize = $('btnColorize'), btnUncolor = $('btnUncolor'), btnExport = $('btnExport'), btnReset = $('btnReset');
+const modelBadge = $('modelBadge'), statusBar = $('statusBar'), mainContent = $('mainContent'), searchInput = $('searchInput'), visibleModelsInfo = $('visibleModelsInfo');
+function norm(v){ return (v ?? '').toString().trim(); }
+function esc(v){ return norm(v).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
+function setStatus(msg, cls=''){ statusBar.textContent = msg; statusBar.className = cls; }
+function lastPathPart(v){ return norm(v).split('/').pop().split('\\').pop(); }
+function getModelName(m, idx){
+  const direct = [m.name,m.modelName,m.fileName,m.filename,m.displayName,m.file?.name,m.model?.name,m.data?.name,m.metadata?.name].map(norm).filter(Boolean);
+  const ifc = direct.map(lastPathPart).find(v => /\.ifc$/i.test(v));
+  if (ifc) return ifc;
+  return direct.length ? lastPathPart(direct[0]) : `Modell ${idx + 1}`;
+}
+function looksLikeIfc(v){ const s = norm(v).toUpperCase(); return /^IFC[A-Z0-9_]+$/.test(s) ? s : ''; }
+function getIfcType(obj){
+  const direct = looksLikeIfc(obj.ifcType || obj.ifcEntity || obj.type || obj.className || '');
+  if (direct) return direct;
+  for (const ps of (obj.properties || [])) for (const p of (ps.properties || [])) { const c = looksLikeIfc(p.value); if (c) return c; }
+  return '';
+}
+function getProp(obj, pset, propName){
+  const psetName = norm(pset).toLowerCase();
+  const target = norm(propName).toLowerCase();
+  for (const ps of (obj.properties || [])) {
+    if (norm(ps.name).toLowerCase() !== psetName) continue;
+    for (const p of (ps.properties || [])) if (norm(p.name).toLowerCase() === target) return norm(p.value);
+  }
+  return '';
+}
+function getElementInfo(obj){
+  const get = (name) => getProp(obj, '0_Element', name);
+  return { objectClass: get('Objektklasse') || get('ObjectClass') || get('Object Class'), objectType: get('Objekttype') || get('ObjectType') || get('Object Type') };
+}
+async function convertRuntimeIdsToGuids(modelId, runtimeIds){
+  const map = new Map();
+  try{
+    if (!API.viewer?.convertToObjectIds) return map;
+    const converted = await API.viewer.convertToObjectIds(modelId, runtimeIds.map(Number));
+    runtimeIds.forEach((rid, i) => map.set(String(rid), converted?.[i] ? String(converted[i]) : ''));
+  }catch(e){ console.warn('GUID-konvertering feilet:', e); }
+  return map;
+}
+async function connect(){
+  try{
+    if (!window.TrimbleConnectWorkspace?.connect) throw new Error('Trimble Connect Workspace API ikke tilgjengelig');
+    API = await window.TrimbleConnectWorkspace.connect(window.parent, () => {}, 30000);
+    btnLoad.disabled = false;
+    modelBadge.textContent = 'Tilkoblet';
+    setStatus('✅ Tilkoblet Trimble Connect. Trykk «Valider alle modeller» for å kontrollere modellene som er i 3D-visningen.', 'ok');
+    btnValidate.disabled = false;
+  }catch(e){
+    modelBadge.textContent = 'Feil';
+    setStatus('❌ ' + (e.message || e), 'error');
+    console.error(e);
+  }
+}
+async function loadModels(){
+  if (!API) return [];
+  btnLoad.disabled = true;
+  setStatus('⏳ Leser modeller i 3D-visningen…');
+  try{
+    const nameMap = new Map();
+    const srcs = [() => API.models?.getModels?.(), () => API.viewer?.getModels?.(), () => API.project?.getModels?.()];
+    for (const src of srcs){
+      try{
+        const res = await src();
+        const list = Array.isArray(res) ? res : (res?.models || res?.items || []);
+        for (const m of list){
+          const id = norm(m.id || m.modelId || '');
+          const fn = [m.name,m.fileName,m.filename,m.displayName].map(norm).find(v => /\.ifc$/i.test(v));
+          if (id && fn) nameMap.set(id, lastPathPart(fn));
+        }
+        if (nameMap.size) break;
+      }catch{}
+    }
+    const objs = await API.viewer.getObjects();
+    allModels = (objs || []).map((m, i) => {
+      const modelId = norm(m.modelId || m.modelid || m['model Id'] || m.id || '');
+      if (!modelId) return null;
+      const count = Array.isArray(m.objects) ? m.objects.length : 0;
+      return { modelId, name: nameMap.get(modelId) || getModelName(m, i), objectCount: count, objects: Array.isArray(m.objects) ? m.objects : [] };
+    }).filter(m => m && m.objectCount > 0);
+    btnValidate.disabled = !allModels.length;
+    btnLoad.disabled = false;
+    if (visibleModelsInfo) visibleModelsInfo.textContent = allModels.length ? `${allModels.length} modell(er) i 3D-visningen` : 'Ingen modeller funnet';
+    setStatus(allModels.length ? `✅ ${allModels.length} modeller funnet i 3D-visningen. Klar for validering.` : '⚠️ Ingen modeller funnet i 3D-visningen.', allModels.length ? 'ok' : 'error');
+    return allModels;
+  }catch(e){
+    btnLoad.disabled = false;
+    setStatus('❌ Feil ved henting av modeller i 3D-visningen: ' + (e.message || e), 'error');
+    console.error(e);
+    return [];
+  }
+}
+function buildDuplicateStats(){
+  const groups = new Map();
+  for (const r of rows){
+    const tag = norm(r.rdsTag);
+    if (!tag) continue;
+    if (!groups.has(tag)) groups.set(tag, []);
+    groups.get(tag).push(r);
+  }
+  duplicateGroups = Array.from(groups.entries()).filter(([, list]) => list.length > 1).map(([tag, list]) => ({ tag, count: list.length, rows: list }));
+  duplicateRows = duplicateGroups.flatMap(g => g.rows.map(r => ({ ...r, duplicateCount: g.count })));
+  const duplicateGuidSet = new Set(duplicateRows.map(r => `${r.modelId}:${r.runtimeId}`));
+  rows = rows.map(r => ({ ...r, isDuplicate: duplicateGuidSet.has(`${r.modelId}:${r.runtimeId}`), duplicateCount: duplicateGuidSet.has(`${r.modelId}:${r.runtimeId}`) ? (groups.get(r.rdsTag)?.length || 0) : 0 }));
+  duplicateRows = rows.filter(r => r.isDuplicate);
+}
+async function validate(){
+  if (!API) return;
+  rows = []; duplicateRows = []; duplicateGroups = [];
+  currentModelName = 'Alle modeller i 3D-visningen';
+  btnValidate.disabled = true; btnColorize.disabled = true; btnExport.disabled = true; btnReset.disabled = true; searchInput.disabled = true;
+  mainContent.innerHTML = '<div class="empty"><div class="icon">⏳</div>Leser alle modeller i 3D-visningen og kontrollerer duplikate RDS-tagger…</div>';
+  setStatus('⏳ Henter modeller fra 3D-visningen…');
+  try{
+    const models = await loadModels();
+    if (!models.length){
+      btnValidate.disabled = false;
+      return;
+    }
+    const CHUNK = 200;
+    let skippedIfc = 0, missingRds = 0, missingTag = 0, readObjects = 0, totalRuntime = 0;
+    for (let mi=0; mi<models.length; mi++){
+      const model = models[mi];
+      const modelId = model.modelId;
+      const modelName = model.name;
+      const runtimeIds = (model.objects || []).map(o => o.id).filter(v => v !== undefined && v !== null);
+      totalRuntime += runtimeIds.length;
+      if (!runtimeIds.length) continue;
+      for (let i=0; i<runtimeIds.length; i+=CHUNK){
+        const chunk = runtimeIds.slice(i, i+CHUNK);
+        const props = await API.viewer.getObjectProperties(modelId, chunk);
+        const guidMap = await convertRuntimeIdsToGuids(modelId, (props || []).map(o => o.id).filter(v => v !== undefined && v !== null));
+        for (const obj of (props || [])){
+          readObjects++;
+          const ifcType = getIfcType(obj);
+          if (IGNORE_IFC_TYPES.has(ifcType)){ skippedIfc++; continue; }
+          let hasRdsPset = false;
+          for (const ps of (obj.properties || [])) if (norm(ps.name).toLowerCase() === PSET.toLowerCase()) hasRdsPset = true;
+          if (!hasRdsPset){ missingRds++; continue; }
+          const tag = getProp(obj, PSET, RDS_PROP);
+          if (!tag) missingTag++;
+          const elem = getElementInfo(obj);
+          rows.push({
+            modelId,
+            modelName,
+            runtimeId: obj.id,
+            guid: guidMap.get(String(obj.id)) || '',
+            name: norm(obj.name || obj.objectName || obj.label || ''),
+            ifcType,
+            objectClass: elem.objectClass,
+            objectType: elem.objectType,
+            rdsTag: tag
+          });
+        }
+        setStatus(`⏳ Leser ${modelName}… ${Math.min(i + CHUNK, runtimeIds.length)} / ${runtimeIds.length} objekter · modell ${mi+1}/${models.length}`);
+      }
+    }
+    buildDuplicateStats();
+    renderResults({ totalRuntime, readObjects, skippedIfc, missingRds, missingTag });
+    btnValidate.disabled = false; btnReset.disabled = false; searchInput.disabled = false;
+    btnColorize.disabled = duplicateRows.length === 0;
+    btnExport.disabled = rows.length === 0;
+    setStatus(`✅ Ferdig. ${rows.length} objekter med 2_RDS kontrollert fra ${models.length} modell(er). ${duplicateRows.length} objekter har duplikat RDS-tag fordelt på ${duplicateGroups.length} koder.`, duplicateRows.length ? '' : 'ok');
+  }catch(e){
+    btnValidate.disabled = false;
+    setStatus('❌ Feil ved validering: ' + (e.message || e), 'error');
+    console.error(e);
+  }
+}
+function donutSvg(uniqueCount, duplicateCount){
+  const total = uniqueCount + duplicateCount;
+  const r = 58, cx = 75, cy = 75, c = 2 * Math.PI * r;
+  if (!total) return `<svg class="donut" viewBox="0 0 150 150"><circle cx="75" cy="75" r="58" fill="none" stroke="#30363d" stroke-width="18"/></svg>`;
+  const dupLen = c * (duplicateCount / total), okLen = c - dupLen;
+  return `<svg class="donut" viewBox="0 0 150 150">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#3fb950" stroke-width="18" stroke-dasharray="${okLen} ${c-okLen}" transform="rotate(-90 ${cx} ${cy})"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#f85149" stroke-width="18" stroke-dasharray="${dupLen} ${c-dupLen}" stroke-dashoffset="${-okLen}" transform="rotate(-90 ${cx} ${cy})"/>
+    <text x="75" y="71" text-anchor="middle" fill="#e6edf3" font-family="JetBrains Mono" font-size="20" font-weight="700">${Math.round((duplicateCount/total)*100)}%</text>
+    <text x="75" y="91" text-anchor="middle" fill="#7d8590" font-family="JetBrains Mono" font-size="10">duplikat</text>
+  </svg>`;
+}
+function renderResults(extra){
+  const totalWithTag = rows.filter(r => r.rdsTag).length;
+  const uniqueCodes = new Set(rows.filter(r => r.rdsTag).map(r => r.rdsTag)).size;
+  const duplicateCodes = duplicateGroups.length;
+  const duplicateObjects = duplicateRows.length;
+  const okObjects = rows.filter(r => r.rdsTag && !r.isDuplicate).length;
+  const missingTag = rows.filter(r => !r.rdsTag).length;
+  const maxBar = Math.max(rows.length, duplicateObjects, missingTag, 1);
+  mainContent.innerHTML = `
+    <section class="cards">
+      <div class="card blue"><div class="label">Objekter kontrollert</div><div class="value">${rows.length}</div><div class="sub">med PropertySet 2_RDS</div></div>
+      <div class="card green"><div class="label">Unike RDS-koder</div><div class="value">${uniqueCodes}</div><div class="sub">basert på 01. RDS-tag</div></div>
+      <div class="card red"><div class="label">Objekter med duplikat</div><div class="value">${duplicateObjects}</div><div class="sub">fordelt på ${duplicateCodes} kode(r)</div></div>
+      <div class="card yellow"><div class="label">Mangler RDS-tag</div><div class="value">${missingTag}</div><div class="sub">har 2_RDS, men tom 01. RDS-tag</div></div>
+    </section>
+    <section class="grid">
+      <div class="panel"><div class="panel-h"><h3>Graf: OK vs duplikat</h3><span class="hint">objekter</span></div><div class="panel-body chart">
+        ${donutSvg(okObjects, duplicateObjects)}
+        <div class="legend">
+          <div class="legend-row"><span class="dot" style="background:#3fb950"></span><span>Ikke duplikat</span><b>${okObjects}</b></div>
+          <div class="legend-row"><span class="dot" style="background:#f85149"></span><span>Duplikat</span><b>${duplicateObjects}</b></div>
+          <div class="legend-row"><span class="dot" style="background:#d29922"></span><span>Mangler tag</span><b>${missingTag}</b></div>
+        </div>
+      </div></div>
+      <div class="panel"><div class="panel-h"><h3>Kontrolloppsummering</h3><span class="hint">${esc(currentModelName)}</span></div><div class="panel-body bars">
+        ${bar('Objekter med 2_RDS', rows.length, maxBar, '#58a6ff')}
+        ${bar('Objekter med tag', totalWithTag, maxBar, '#3fb950')}
+        ${bar('Duplikatobjekter', duplicateObjects, maxBar, '#f85149')}
+        ${bar('Mangler tag', missingTag, maxBar, '#d29922')}
+        <div class="hint" style="margin-top:5px">Hoppet over: ${extra.skippedIfc} IFC container/type-objekter · ${extra.missingRds} uten 2_RDS.</div>
+      </div></div>
+    </section>
+    <section class="panel"><div class="panel-h"><h3>Duplikate RDS-tagger</h3><span class="hint">Klikk på rad for å velge objekt i modellen</span></div><div class="table-wrap"><table><thead><tr><th>Status</th><th>Antall</th><th>Modell</th><th>01. RDS-tag</th><th>Objektnavn</th><th>GUID</th><th>Objektklasse</th><th>Objekttype</th></tr></thead><tbody id="resultBody"></tbody></table></div></section>
+  `;
+  renderTable();
+}
+function bar(label, value, max, color){
+  const width = Math.max(0, Math.round((value / max) * 100));
+  return `<div class="bar-row"><div class="bar-label">${esc(label)}</div><div class="bar-track"><div class="bar-fill" style="width:${width}%;background:${color}"></div></div><div class="bar-val">${value}</div></div>`;
+}
+function renderTable(){
+  const body = $('resultBody');
+  if (!body) return;
+  const term = searchTerm.toLowerCase();
+  const source = rows.filter(r => r.isDuplicate || !r.rdsTag);
+  const filtered = source.filter(r => !term || [r.rdsTag,r.guid,r.name,r.modelName,r.objectClass,r.objectType].some(v => norm(v).toLowerCase().includes(term)));
+  if (!filtered.length){
+    body.innerHTML = `<tr><td colspan="8" class="empty" style="padding:22px">Ingen duplikater eller manglende RDS-tagger matcher filteret.</td></tr>`;
+    return;
+  }
+  filtered.sort((a,b) => norm(a.rdsTag).localeCompare(norm(b.rdsTag)) || norm(a.name).localeCompare(norm(b.name)));
+  body.innerHTML = filtered.map(r => `
+    <tr class="clickable" onclick="selectObject('${esc(r.modelId)}','${esc(r.runtimeId)}')">
+      <td>${r.rdsTag ? `<span class="pill red">Duplikat</span>` : `<span class="pill">Mangler tag</span>`}</td>
+      <td>${r.rdsTag ? esc(r.duplicateCount) : '-'}</td>
+      <td class="muted" title="${esc(r.modelName)}">${esc(r.modelName) || '-'}</td>
+      <td class="rds" title="${esc(r.rdsTag)}">${esc(r.rdsTag) || '<span class="muted">–</span>'}</td>
+      <td title="${esc(r.name)}">${esc(r.name) || '<span class="muted">–</span>'}</td>
+      <td class="muted" title="${esc(r.guid)}">${esc(r.guid) || '<span class="muted">–</span>'}</td>
+      <td class="muted" title="${esc(r.objectClass)}">${esc(r.objectClass) || '-'}</td>
+      <td class="muted" title="${esc(r.objectType)}">${esc(r.objectType) || '-'}</td>
+    </tr>`).join('');
+}
+window.selectObject = async function(modelId, runtimeId){
+  if (!API || !runtimeId) return;
+  const rid = Number(runtimeId);
+  try{
+    await API.viewer.setSelection({ modelObjectIds:[{ modelId, objectRuntimeIds:[rid] }] }, 'set');
+    try{ await API.viewer.setCamera({ modelObjectIds:[{ modelId, objectRuntimeIds:[rid] }] }, { animationTime:500 }); }catch{}
+  }catch(e){ console.warn('Kunne ikke velge objekt:', e); }
+};
+async function colorizeDuplicates(){
+  if (!API || !duplicateRows.length) return;
+  btnColorize.disabled = true;
+  setStatus('🎨 Fargelegger duplikatobjekter rødt…');
+  try{
+    await API.viewer.setObjectState(undefined, { color:'reset' });
+    const map = new Map();
+    for (const r of duplicateRows){
+      if (!map.has(r.modelId)) map.set(r.modelId, []);
+      map.get(r.modelId).push(Number(r.runtimeId));
+    }
+    const modelObjectIds = Array.from(map.entries()).map(([modelId, objectRuntimeIds]) => ({ modelId, objectRuntimeIds }));
+    await API.viewer.setObjectState({ modelObjectIds }, { color:{ r:248, g:81, b:73, a:255 } });
+    btnUncolor.disabled = false;
+    btnColorize.disabled = false;
+    setStatus(`🎨 ${duplicateRows.length} duplikatobjekter er fargelagt rødt.`, 'ok');
+  }catch(e){
+    btnColorize.disabled = false;
+    setStatus('❌ Feil ved fargelegging: ' + (e.message || e), 'error');
+    console.error(e);
+  }
+}
+async function removeColors(){
+  if (!API) return;
+  try{
+    await API.viewer.setObjectState(undefined, { color:'reset' });
+    btnUncolor.disabled = true;
+    setStatus('⬜ Modellfarger fjernet.', 'ok');
+  }catch(e){ setStatus('❌ Feil ved fjerning av farger: ' + (e.message || e), 'error'); }
+}
+function csvEscape(v){ return '"' + norm(v).replace(/"/g,'""') + '"'; }
+function exportCsv(){
+  const header = ['Modell','Status','DuplikatAntall','01. RDS-tag','GUID','RuntimeId','Objektnavn','IFCType','Objektklasse','Objekttype'];
+  const outRows = rows.filter(r => r.isDuplicate || !r.rdsTag);
+  const lines = [header.map(csvEscape).join(';')];
+  for (const r of outRows){
+    lines.push([r.modelName, r.rdsTag ? 'Duplikat' : 'Mangler RDS-tag', r.duplicateCount || '', r.rdsTag, r.guid, r.runtimeId, r.name, r.ifcType, r.objectClass, r.objectType].map(csvEscape).join(';'));
+  }
+  const blob = new Blob([lines.join('\r\n')], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+  a.href = url; a.download = `rds_duplicate_checker_${stamp}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  setStatus(`⬇ CSV eksportert med ${outRows.length} rader.`, 'ok');
+}
+function resetAll(){
+  rows = []; duplicateRows = []; duplicateGroups = []; searchTerm = ''; searchInput.value = ''; searchInput.disabled = true;
+  btnColorize.disabled = true; btnUncolor.disabled = true; btnExport.disabled = true; btnReset.disabled = true;
+  try{ API?.viewer?.setObjectState?.(undefined, { color:'reset' }); }catch{}
+  mainContent.innerHTML = '<div class="empty"><div class="icon">🔎</div>Trykk <strong>Valider alle modeller</strong> for å kontrollere duplikate RDS-tagger i alle modeller i 3D-visningen.</div>';
+  setStatus('Nullstilt. Trykk «Valider alle modeller» for å kjøre kontroll på nytt.');
+}
+btnLoad.addEventListener('click', loadModels);
+btnValidate.addEventListener('click', validate);
+btnColorize.addEventListener('click', colorizeDuplicates);
+btnUncolor.addEventListener('click', removeColors);
+btnExport.addEventListener('click', exportCsv);
+btnReset.addEventListener('click', resetAll);
+searchInput.addEventListener('input', () => { searchTerm = searchInput.value; renderTable(); });
+connect();
+</script>
+</body>
+</html>
