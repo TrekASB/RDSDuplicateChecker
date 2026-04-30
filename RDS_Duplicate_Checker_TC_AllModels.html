@@ -2,7 +2,7 @@
 <html lang="nb">
 <head>
   <meta charset="UTF-8" />
-  <title>RDS Duplicate Checker - Alle 3D-modeller</title>
+  <title>RDS Duplicate Checker - Alle 3D-modeller V.3</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
   <style>
@@ -31,8 +31,8 @@
 <body>
 <header>
   <div class="title">
-    <h1>RDS Duplicate Checker</h1>
-    <p>Validerer duplikate koder i <strong>2_RDS</strong> → <strong>01. RDS-tag</strong> på alle modeller som er lastet/synlige i 3D-visningen</p>
+    <h1>RDS Duplicate Checker V.3</h1>
+    <p>Validerer duplikate koder i <strong>2_RDS</strong> → <strong>01. RDS-tag</strong> på alle modeller som er lastet/synlige i 3D-visningen · VA-kumdeler og armeringsjern med samme RDS-tag grupperes</p>
   </div>
   <span class="badge" id="modelBadge">Ikke tilkoblet</span>
   <button class="btn" id="btnLoad" disabled>Oppdater 3D-modeller</button>
@@ -92,9 +92,60 @@ function getProp(obj, pset, propName){
   }
   return '';
 }
+function getPropAnyPset(obj, propNames){
+  const targets = (Array.isArray(propNames) ? propNames : [propNames]).map(v => norm(v).toLowerCase());
+  for (const ps of (obj.properties || [])) {
+    for (const p of (ps.properties || [])) {
+      if (targets.includes(norm(p.name).toLowerCase())) return norm(p.value);
+    }
+  }
+  return '';
+}
 function getElementInfo(obj){
   const get = (name) => getProp(obj, '0_Element', name);
-  return { objectClass: get('Objektklasse') || get('ObjectClass') || get('Object Class'), objectType: get('Objekttype') || get('ObjectType') || get('Object Type') };
+  return {
+    objectClass: get('Objektklasse') || get('ObjectClass') || get('Object Class'),
+    objectType: get('Objekttype') || get('ObjectType') || get('Object Type'),
+    idNr: getPropAnyPset(obj, ['ID.nr','ID nr','ID','Navn','Name'])
+  };
+}
+function normalizeCompositeId(v){
+  return norm(v).toUpperCase().replace(/\s+/g, '').replace(/[.,;:]$/g, '');
+}
+function extractVaKumId(row){
+  const direct = normalizeCompositeId(row.idNr);
+  if (direct) return direct;
+  const text = normalizeCompositeId([row.name, row.objectType, row.objectClass].filter(Boolean).join(' '));
+  const m = text.match(/\b(?:SF|OV|SP|VK|VL|SK|SFK|SFG|SFR|OK|HS|HY)\d{2,6}[A-Z]?\b/i);
+  return m ? normalizeCompositeId(m[0]) : '';
+}
+function isVaKumCompositePart(row){
+  const text = [row.name,row.objectClass,row.objectType,row.ifcType,row.rdsTag].map(v => norm(v).toLowerCase()).join(' | ');
+  const hasKumOrPart = /kum|sandfang|overvannskum|spillvannskum|vannkum|hjelpesluk|hydrant|lokk|kjegle|bunnring|bunnplate|bunnseksjon|justeringsring|ring|topp/.test(text);
+  const hasVaRds = /\.(?:wpa10[23579]|wpa11[0-9]|wpa12[1-4]|uca10[4-9]|uca110|xma101)\./i.test(row.rdsTag || '');
+  return Boolean((hasKumOrPart || hasVaRds) && extractVaKumId(row));
+}
+
+function isRebarCompositePart(row){
+  const text = [row.name,row.objectClass,row.objectType,row.ifcType,row.rdsTag].map(v => norm(v).toLowerCase()).join(' | ');
+
+  // Armeringsjern eksporteres ofte som mange enkeltobjekter med samme RDS-tag.
+  // Disse skal representere samme armeringspost/gruppe og skal derfor ikke flagges som duplikat.
+  return Boolean(
+    row.rdsTag && (
+      row.ifcType === 'IFCREINFORCINGBAR' ||
+      row.ifcType === 'IFCREINFORCINGELEMENT' ||
+      row.ifcType === 'IFCREINFORCINGMESH' ||
+      /armering|armeringsjern|reinforcing|rebar|b500nc|byggeetappe/.test(text) ||
+      /\.UMA10[1-9]\./i.test(row.rdsTag || '')
+    )
+  );
+}
+
+function duplicateUnitKey(row){
+  if (isVaKumCompositePart(row)) return `VA_KUM:${extractVaKumId(row)}`;
+  if (isRebarCompositePart(row)) return `ARMERING:${row.rdsTag}`;
+  return `OBJ:${row.modelId}:${row.runtimeId}`;
 }
 async function convertRuntimeIdsToGuids(modelId, runtimeIds){
   const map = new Map();
@@ -158,17 +209,43 @@ async function loadModels(){
   }
 }
 function buildDuplicateStats(){
-  const groups = new Map();
+  const tagGroups = new Map();
+
   for (const r of rows){
     const tag = norm(r.rdsTag);
     if (!tag) continue;
-    if (!groups.has(tag)) groups.set(tag, []);
-    groups.get(tag).push(r);
+
+    const unitKey = duplicateUnitKey(r);
+    const compositeId = unitKey.startsWith('VA_KUM:') ? unitKey.replace('VA_KUM:', '') : '';
+    const rebarGroup = unitKey.startsWith('ARMERING:') ? 'Armering' : '';
+    r.duplicateUnitKey = unitKey;
+    r.compositeId = compositeId || rebarGroup;
+    r.isCompositeVaKumPart = Boolean(compositeId);
+    r.isCompositeRebarPart = Boolean(rebarGroup);
+
+    if (!tagGroups.has(tag)) tagGroups.set(tag, new Map());
+    const units = tagGroups.get(tag);
+    if (!units.has(unitKey)) units.set(unitKey, []);
+    units.get(unitKey).push(r);
   }
-  duplicateGroups = Array.from(groups.entries()).filter(([, list]) => list.length > 1).map(([tag, list]) => ({ tag, count: list.length, rows: list }));
-  duplicateRows = duplicateGroups.flatMap(g => g.rows.map(r => ({ ...r, duplicateCount: g.count })));
-  const duplicateGuidSet = new Set(duplicateRows.map(r => `${r.modelId}:${r.runtimeId}`));
-  rows = rows.map(r => ({ ...r, isDuplicate: duplicateGuidSet.has(`${r.modelId}:${r.runtimeId}`), duplicateCount: duplicateGuidSet.has(`${r.modelId}:${r.runtimeId}`) ? (groups.get(r.rdsTag)?.length || 0) : 0 }));
+
+  duplicateGroups = [];
+  for (const [tag, units] of tagGroups.entries()){
+    if (units.size <= 1) continue; // flere deler i samme kum teller som én logisk enhet, ikke duplikat
+    const groupedRows = Array.from(units.values()).flat();
+    duplicateGroups.push({ tag, count: units.size, objectCount: groupedRows.length, rows: groupedRows });
+  }
+
+  const duplicateObjectSet = new Set(duplicateGroups.flatMap(g => g.rows.map(r => `${r.modelId}:${r.runtimeId}`)));
+  const duplicateUnitCountByTag = new Map(duplicateGroups.map(g => [g.tag, g.count]));
+  const duplicateObjectCountByTag = new Map(duplicateGroups.map(g => [g.tag, g.objectCount]));
+
+  rows = rows.map(r => ({
+    ...r,
+    isDuplicate: duplicateObjectSet.has(`${r.modelId}:${r.runtimeId}`),
+    duplicateCount: duplicateUnitCountByTag.get(r.rdsTag) || 0,
+    duplicateObjectCount: duplicateObjectCountByTag.get(r.rdsTag) || 0
+  }));
   duplicateRows = rows.filter(r => r.isDuplicate);
 }
 async function validate(){
@@ -216,6 +293,7 @@ async function validate(){
             ifcType,
             objectClass: elem.objectClass,
             objectType: elem.objectType,
+            idNr: elem.idNr,
             rdsTag: tag
           });
         }
@@ -227,7 +305,7 @@ async function validate(){
     btnValidate.disabled = false; btnReset.disabled = false; searchInput.disabled = false;
     btnColorize.disabled = duplicateRows.length === 0;
     btnExport.disabled = rows.length === 0;
-    setStatus(`✅ Ferdig. ${rows.length} objekter med 2_RDS kontrollert fra ${models.length} modell(er). ${duplicateRows.length} objekter har duplikat RDS-tag fordelt på ${duplicateGroups.length} koder.`, duplicateRows.length ? '' : 'ok');
+    setStatus(`✅ Ferdig. ${rows.length} objekter med 2_RDS kontrollert fra ${models.length} modell(er). ${duplicateRows.length} objekter har duplikat RDS-tag fordelt på ${duplicateGroups.length} koder. VA-kumdeler med samme ID.nr og armeringsjern med samme RDS-tag telles som én enhet.`, duplicateRows.length ? '' : 'ok');
   }catch(e){
     btnValidate.disabled = false;
     setStatus('❌ Feil ved validering: ' + (e.message || e), 'error');
@@ -251,6 +329,8 @@ function renderResults(extra){
   const uniqueCodes = new Set(rows.filter(r => r.rdsTag).map(r => r.rdsTag)).size;
   const duplicateCodes = duplicateGroups.length;
   const duplicateObjects = duplicateRows.length;
+  const compositeVaKumParts = rows.filter(r => r.isCompositeVaKumPart).length;
+  const compositeVaKumUnits = new Set(rows.filter(r => r.isCompositeVaKumPart).map(r => `${r.rdsTag}|${r.compositeId}`)).size;
   const okObjects = rows.filter(r => r.rdsTag && !r.isDuplicate).length;
   const missingTag = rows.filter(r => !r.rdsTag).length;
   const maxBar = Math.max(rows.length, duplicateObjects, missingTag, 1);
@@ -258,7 +338,7 @@ function renderResults(extra){
     <section class="cards">
       <div class="card blue"><div class="label">Objekter kontrollert</div><div class="value">${rows.length}</div><div class="sub">med PropertySet 2_RDS</div></div>
       <div class="card green"><div class="label">Unike RDS-koder</div><div class="value">${uniqueCodes}</div><div class="sub">basert på 01. RDS-tag</div></div>
-      <div class="card red"><div class="label">Objekter med duplikat</div><div class="value">${duplicateObjects}</div><div class="sub">fordelt på ${duplicateCodes} kode(r)</div></div>
+      <div class="card red"><div class="label">Objekter med duplikat</div><div class="value">${duplicateObjects}</div><div class="sub">${duplicateCodes} kode(r) · kum/armering gruppert</div></div>
       <div class="card yellow"><div class="label">Mangler RDS-tag</div><div class="value">${missingTag}</div><div class="sub">har 2_RDS, men tom 01. RDS-tag</div></div>
     </section>
     <section class="grid">
@@ -275,10 +355,10 @@ function renderResults(extra){
         ${bar('Objekter med tag', totalWithTag, maxBar, '#3fb950')}
         ${bar('Duplikatobjekter', duplicateObjects, maxBar, '#f85149')}
         ${bar('Mangler tag', missingTag, maxBar, '#d29922')}
-        <div class="hint" style="margin-top:5px">Hoppet over: ${extra.skippedIfc} IFC container/type-objekter · ${extra.missingRds} uten 2_RDS.</div>
+        <div class="hint" style="margin-top:5px">Hoppet over: ${extra.skippedIfc} IFC container/type-objekter · ${extra.missingRds} uten 2_RDS. VA-kumdeler gruppert: ${compositeVaKumParts} objekter / ${compositeVaKumUnits} kum-enheter. Armeringsjern med samme RDS-tag grupperes som én enhet.</div>
       </div></div>
     </section>
-    <section class="panel"><div class="panel-h"><h3>Duplikate RDS-tagger</h3><span class="hint">Klikk på rad for å velge objekt i modellen</span></div><div class="table-wrap"><table><thead><tr><th>Status</th><th>Antall</th><th>Modell</th><th>01. RDS-tag</th><th>Objektnavn</th><th>GUID</th><th>Objektklasse</th><th>Objekttype</th></tr></thead><tbody id="resultBody"></tbody></table></div></section>
+    <section class="panel"><div class="panel-h"><h3>Duplikate RDS-tagger</h3><span class="hint">Klikk på rad for å velge objekt i modellen</span></div><div class="table-wrap"><table><thead><tr><th>Status</th><th>Antall</th><th>Modell</th><th>01. RDS-tag</th><th>Objektnavn</th><th>GUID</th><th>Objektklasse</th><th>Objekttype</th><th>ID.nr / gruppe</th></tr></thead><tbody id="resultBody"></tbody></table></div></section>
   `;
   renderTable();
 }
@@ -291,22 +371,23 @@ function renderTable(){
   if (!body) return;
   const term = searchTerm.toLowerCase();
   const source = rows.filter(r => r.isDuplicate || !r.rdsTag);
-  const filtered = source.filter(r => !term || [r.rdsTag,r.guid,r.name,r.modelName,r.objectClass,r.objectType].some(v => norm(v).toLowerCase().includes(term)));
+  const filtered = source.filter(r => !term || [r.rdsTag,r.guid,r.name,r.modelName,r.objectClass,r.objectType,r.idNr,r.compositeId].some(v => norm(v).toLowerCase().includes(term)));
   if (!filtered.length){
-    body.innerHTML = `<tr><td colspan="8" class="empty" style="padding:22px">Ingen duplikater eller manglende RDS-tagger matcher filteret.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="9" class="empty" style="padding:22px">Ingen duplikater eller manglende RDS-tagger matcher filteret.</td></tr>`;
     return;
   }
   filtered.sort((a,b) => norm(a.rdsTag).localeCompare(norm(b.rdsTag)) || norm(a.name).localeCompare(norm(b.name)));
   body.innerHTML = filtered.map(r => `
     <tr class="clickable" onclick="selectObject('${esc(r.modelId)}','${esc(r.runtimeId)}')">
       <td>${r.rdsTag ? `<span class="pill red">Duplikat</span>` : `<span class="pill">Mangler tag</span>`}</td>
-      <td>${r.rdsTag ? esc(r.duplicateCount) : '-'}</td>
+      <td>${r.rdsTag ? `${esc(r.duplicateCount)} enhet(er) / ${esc(r.duplicateObjectCount || r.duplicateCount)} objekt` : '-'}</td>
       <td class="muted" title="${esc(r.modelName)}">${esc(r.modelName) || '-'}</td>
       <td class="rds" title="${esc(r.rdsTag)}">${esc(r.rdsTag) || '<span class="muted">–</span>'}</td>
       <td title="${esc(r.name)}">${esc(r.name) || '<span class="muted">–</span>'}</td>
       <td class="muted" title="${esc(r.guid)}">${esc(r.guid) || '<span class="muted">–</span>'}</td>
       <td class="muted" title="${esc(r.objectClass)}">${esc(r.objectClass) || '-'}</td>
       <td class="muted" title="${esc(r.objectType)}">${esc(r.objectType) || '-'}</td>
+      <td class="muted" title="${esc(r.idNr || r.compositeId)}">${esc(r.compositeId || r.idNr) || '-'}</td>
     </tr>`).join('');
 }
 window.selectObject = async function(modelId, runtimeId){
@@ -349,11 +430,11 @@ async function removeColors(){
 }
 function csvEscape(v){ return '"' + norm(v).replace(/"/g,'""') + '"'; }
 function exportCsv(){
-  const header = ['Modell','Status','DuplikatAntall','01. RDS-tag','GUID','RuntimeId','Objektnavn','IFCType','Objektklasse','Objekttype'];
+  const header = ['Modell','Status','DuplikatEnheter','DuplikatObjekter','01. RDS-tag','GUID','RuntimeId','Objektnavn','IFCType','Objektklasse','Objekttype','ID.nr','Gruppe' ];
   const outRows = rows.filter(r => r.isDuplicate || !r.rdsTag);
   const lines = [header.map(csvEscape).join(';')];
   for (const r of outRows){
-    lines.push([r.modelName, r.rdsTag ? 'Duplikat' : 'Mangler RDS-tag', r.duplicateCount || '', r.rdsTag, r.guid, r.runtimeId, r.name, r.ifcType, r.objectClass, r.objectType].map(csvEscape).join(';'));
+    lines.push([r.modelName, r.rdsTag ? 'Duplikat' : 'Mangler RDS-tag', r.duplicateCount || '', r.duplicateObjectCount || '', r.rdsTag, r.guid, r.runtimeId, r.name, r.ifcType, r.objectClass, r.objectType, r.idNr, r.compositeId].map(csvEscape).join(';'));
   }
   const blob = new Blob([lines.join('\r\n')], { type:'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
